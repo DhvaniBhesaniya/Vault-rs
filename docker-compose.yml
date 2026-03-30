@@ -1,0 +1,32 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: rustvault-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      # For development; add auth for production
+      MONGO_INITDB_DATABASE: rustvault
+    restart: unless-stopped
+
+  # Uncomment below to run the app in Docker as well
+  # app:
+  #   build: .
+  #   container_name: rustvault-app
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     HOST: 0.0.0.0
+  #     PORT: 8080
+  #     MONGODB_URI: mongodb://mongodb:27017
+  #     DATABASE_NAME: rustvault
+  #     JWT_SECRET: ${JWT_SECRET}
+  #     RUST_LOG: vault_rs=info,tower_http=info
+  #   depends_on:
+  #     - mongodb
+  #   restart: unless-stopped
+
+volumes:
+  mongo_data:

@@ -61,7 +61,7 @@ Master Password (user input, NEVER stored anywhere)
         │               │ Symmetric Key (256-bit)       │
         ▼               │ Encrypts all vault items      │
 ┌──────────────────┐    │ using AES-256-GCM with        │
-│ Server hashes    │    │ unique nonce per item          │
+│ Server hashes    │    │ unique nonce per item         │
 │ again with       │    └───────────────────────────────┘
 │ Argon2id         │
 │ → Stored Hash    │

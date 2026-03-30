@@ -1,0 +1,618 @@
+{
+  "info": {
+    "_postman_id": "rustvault-api-collection",
+    "name": "RustVault API",
+    "description": "Complete API collection for RustVault — a zero-knowledge, self-hosted password manager built with Rust/Axum/MongoDB.\n\n## Setup\n1. Import this collection into Postman\n2. Import the companion `RustVault.postman_environment.json`\n3. Start the server: `cargo run`\n4. Ensure MongoDB is running: `docker compose up -d`\n\n## Auth Flow\n1. Call **Register** to create an account\n2. Call **Login** — tokens are auto-saved to collection variables\n3. All protected endpoints auto-use the saved `access_token`\n4. Use **Refresh Token** when the access token expires\n\n## Notes\n- The `master_password_hash` in Register/Login must be computed client-side\n- Use the test values provided or compute your own with Argon2id + HKDF\n- All vault data (names, contents) is encrypted client-side before sending",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "item_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "folder_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "description": "Server health and readiness endpoints (public, no auth needed).",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "health"]
+            },
+            "description": "Basic liveness check. Returns server status and version."
+          },
+          "response": []
+        },
+        {
+          "name": "Readiness Check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/health/ready",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "health", "ready"]
+            },
+            "description": "Readiness check that verifies MongoDB connectivity."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "description": "Authentication endpoints: register, login, token refresh, logout.",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.data && json.data.user_id) {",
+                  "        pm.collectionVariables.set('user_id', json.data.user_id);",
+                  "        console.log('Saved user_id:', json.data.user_id);",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test('Registration successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.user_id).to.be.a('string');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"testuser@example.com\",\n  \"name\": \"Test User\",\n  \"master_password_hash\": \"<BASE64_ENCODED_HKDF_HASH>\",\n  \"protected_symmetric_key\": \"<BASE64_ENCRYPTED_SYMMETRIC_KEY>\",\n  \"protected_symmetric_key_nonce\": \"<BASE64_NONCE>\",\n  \"kdf_memory_kb\": 65536,\n  \"kdf_iterations\": 3,\n  \"kdf_parallelism\": 4,\n  \"password_hint\": \"My hint\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register"]
+            },
+            "description": "Register a new user account.\n\n**Note:** The `master_password_hash` must be computed client-side:\n1. `master_key = Argon2id(password, email_as_salt)`\n2. `auth_hash = HKDF-SHA256(master_key_as_salt, password_as_ikm, info=\"master_password_hash\")`\n3. `master_password_hash = base64(auth_hash)`\n\nThe `protected_symmetric_key` is a random AES-256 key encrypted with the master key."
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.data) {",
+                  "        pm.collectionVariables.set('access_token', json.data.access_token || '');",
+                  "        pm.collectionVariables.set('refresh_token', json.data.refresh_token || '');",
+                  "        pm.collectionVariables.set('user_id', json.data.user_id || '');",
+                  "        console.log('Tokens saved to collection variables');",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test('Login successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.access_token).to.be.a('string');",
+                  "    pm.expect(json.data.refresh_token).to.be.a('string');",
+                  "    pm.expect(json.data.token_type).to.equal('Bearer');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"testuser@example.com\",\n  \"master_password_hash\": \"<BASE64_ENCODED_HKDF_HASH>\",\n  \"device_name\": \"Postman\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Login with email and master password hash.\n\nOn success, `access_token` and `refresh_token` are automatically saved to collection variables for use in subsequent requests.\n\nResponse includes:\n- JWT tokens (access + refresh)\n- Protected symmetric key (for client-side decryption)\n- KDF parameters (so the client knows which params to use)\n- User info"
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.data) {",
+                  "        pm.collectionVariables.set('access_token', json.data.access_token || '');",
+                  "        pm.collectionVariables.set('refresh_token', json.data.refresh_token || '');",
+                  "        console.log('Tokens refreshed and saved');",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test('Token refresh successful', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.access_token).to.be.a('string');",
+                  "    pm.expect(json.data.refresh_token).to.be.a('string');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "refresh"]
+            },
+            "description": "Refresh the access token using a valid refresh token.\n\nImplements token rotation: the old refresh token is invalidated and a new one is issued. Both new tokens are automatically saved to collection variables."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "logout"]
+            },
+            "description": "Logout the current session by revoking the refresh token.\n\nRequires Bearer token authentication."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout All Sessions",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout-all",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "logout-all"]
+            },
+            "description": "Revoke ALL sessions for the authenticated user. Forces re-login on every device.\n\nRequires Bearer token authentication."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Vault Items",
+      "description": "CRUD operations for encrypted vault items (logins, cards, notes, etc.).\n\nAll endpoints require Bearer token authentication.",
+      "item": [
+        {
+          "name": "Create Vault Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.data && json.data.id) {",
+                  "        pm.collectionVariables.set('item_id', json.data.id);",
+                  "        console.log('Saved item_id:', json.data.id);",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test('Vault item created', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.id).to.be.a('string');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"item_type\": \"login\",\n  \"name_encrypted\": \"<BASE64_ENCRYPTED_NAME>\",\n  \"data_encrypted\": \"<BASE64_ENCRYPTED_DATA>\",\n  \"nonce\": \"<BASE64_NONCE>\",\n  \"folder_id\": null,\n  \"favorite\": false,\n  \"reprompt\": false,\n  \"tags\": [\"work\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/items",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "items"]
+            },
+            "description": "Create a new vault item.\n\n**Item types:** `login`, `card`, `identity`, `secure_note`, `ssh_key`, `api_credential`\n\nAll sensitive data (name, data) must be encrypted client-side with AES-256-GCM before sending.\n\nThe `item_id` is automatically saved to collection variables."
+          },
+          "response": []
+        },
+        {
+          "name": "List Vault Items",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/items?page=1&per_page=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "items"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "per_page", "value": "50" }
+              ]
+            },
+            "description": "List all vault items for the authenticated user with pagination.\n\nQuery params:\n- `page` (default: 1)\n- `per_page` (default: 50, max: 100)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Vault Item",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/items/{{item_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "items", "{{item_id}}"]
+            },
+            "description": "Get a single vault item by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Vault Item",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name_encrypted\": \"<BASE64_UPDATED_ENCRYPTED_NAME>\",\n  \"data_encrypted\": \"<BASE64_UPDATED_ENCRYPTED_DATA>\",\n  \"nonce\": \"<BASE64_NEW_NONCE>\",\n  \"favorite\": true,\n  \"tags\": [\"work\", \"updated\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/items/{{item_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "items", "{{item_id}}"]
+            },
+            "description": "Update an existing vault item. All fields are optional — only provided fields are updated."
+          },
+          "response": []
+        },
+        {
+          "name": "Soft Delete (Move to Trash)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/items/{{item_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "items", "{{item_id}}"]
+            },
+            "description": "Soft-delete a vault item (moves it to trash). The item can be restored later."
+          },
+          "response": []
+        },
+        {
+          "name": "List Trash",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/items/trash",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "items", "trash"]
+            },
+            "description": "List all soft-deleted (trashed) vault items."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore from Trash",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/items/{{item_id}}/restore",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "items", "{{item_id}}", "restore"]
+            },
+            "description": "Restore a soft-deleted vault item from the trash."
+          },
+          "response": []
+        },
+        {
+          "name": "Permanent Delete",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/items/{{item_id}}/permanent",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "items", "{{item_id}}", "permanent"]
+            },
+            "description": "Permanently delete a vault item. This action is irreversible."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Folders",
+      "description": "CRUD operations for vault folders (encrypted folder names).\n\nAll endpoints require Bearer token authentication.",
+      "item": [
+        {
+          "name": "Create Folder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.data && json.data.id) {",
+                  "        pm.collectionVariables.set('folder_id', json.data.id);",
+                  "        console.log('Saved folder_id:', json.data.id);",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test('Folder created', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name_encrypted\": \"<BASE64_ENCRYPTED_FOLDER_NAME>\",\n  \"parent_folder_id\": null\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/folders",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "folders"]
+            },
+            "description": "Create a new folder. The `name_encrypted` should be the folder name encrypted with AES-256-GCM.\n\nOptionally set `parent_folder_id` to create a subfolder."
+          },
+          "response": []
+        },
+        {
+          "name": "List Folders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/folders",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "folders"]
+            },
+            "description": "List all folders for the authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Folder",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name_encrypted\": \"<BASE64_UPDATED_ENCRYPTED_NAME>\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/folders/{{folder_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "folders", "{{folder_id}}"]
+            },
+            "description": "Update a folder's encrypted name."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Folder",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/vault/folders/{{folder_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "vault", "folders", "{{folder_id}}"]
+            },
+            "description": "Delete a folder. Items inside the folder are NOT deleted — they become unfoldered."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Tools",
+      "description": "Utility endpoints for password generation and breach checking.\n\nThese endpoints are **public** (no auth required).",
+      "item": [
+        {
+          "name": "Generate Password",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"length\": 20,\n  \"uppercase\": true,\n  \"lowercase\": true,\n  \"numbers\": true,\n  \"symbols\": true,\n  \"exclude_ambiguous\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tools/generate-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "tools", "generate-password"]
+            },
+            "description": "Generate a cryptographically random password.\n\nAll parameters are optional:\n- `length`: 8-128 (default: 20)\n- `uppercase`, `lowercase`, `numbers`, `symbols`: boolean toggles\n- `exclude_ambiguous`: removes chars like `0O`, `1lI`"
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Passphrase",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"num_words\": 5,\n  \"separator\": \"-\",\n  \"capitalize\": true,\n  \"include_number\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tools/generate-passphrase",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "tools", "generate-passphrase"]
+            },
+            "description": "Generate a random passphrase from a word list.\n\nAll parameters are optional:\n- `num_words`: 3-10 (default: 5)\n- `separator`: string between words (default: \"-\")\n- `capitalize`: capitalize first letter of each word\n- `include_number`: append a random number to one word"
+          },
+          "response": []
+        },
+        {
+          "name": "Check Breach (HIBP)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sha1_hash\": \"5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tools/check-breach",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "tools", "check-breach"]
+            },
+            "description": "Check if a password appears in the Have I Been Pwned database using k-Anonymity.\n\nThe client computes the SHA-1 hash of the password and sends the full hash. The server uses only the first 5 chars as the k-Anonymity prefix.\n\nExample hash above is SHA-1 of \"password\" — known to be breached millions of times."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
